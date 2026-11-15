@@ -1,0 +1,78 @@
+name: Build Executables (Windows, Linux, macOS)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: scrcpy-light-launcher-windows
+            binary_file: dist/scrcpy-light-launcher.exe
+            asset_name: scrcpy-light-launcher-windows-x64.exe
+          - os: ubuntu-latest
+            artifact_name: scrcpy-light-launcher-linux
+            binary_file: dist/scrcpy-light-launcher
+            asset_name: scrcpy-light-launcher-linux-x64
+          - os: macos-latest
+            artifact_name: scrcpy-light-launcher-macos
+            binary_file: dist/scrcpy-light-launcher-macos.zip
+            asset_name: scrcpy-light-launcher-macos.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Tkinter on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build single-file executable
+        run: |
+          pyinstaller --onefile --windowed --clean --name "scrcpy-light-launcher" scrcpy_launcher.py
+
+      - name: Package macOS .app bundle into zip
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          zip -r scrcpy-light-launcher-macos.zip scrcpy-light-launcher.app scrcpy-light-launcher
+
+      - name: Upload build artifact (Downloadable from Actions tab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.binary_file }}
+          if-no-files-found: error
+
+      - name: Publish to GitHub Releases (when pushing a v* tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.binary_file }}
+          generate_release_notes: true

@@ -2,6 +2,7 @@
 build/
 dist/
 *.spec
+scrcpy_cpl.ico
 
 # Python cache
 __pycache__/

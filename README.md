@@ -7,12 +7,15 @@ Works natively on **Windows**, **Linux**, and **macOS** using only Python's stan
 
 - **Clean Control Panel Applet Design (`.cpl` Inspired)**:
   - Fixed-width static geometry (zero layout shift when switching presets).
-  - **Light Mode** default (Windows 11 Control Panel style) + one-click **Dark Mode** toggle.
+  - **Light Mode** default (Windows Control Panel style) + one-click **Dark Mode** toggle.
   - Built-in **EN / ID** language switcher in the top-right corner (English by default).
 - **Zero-Trust / Transparent Dependency Detection**:
-  - Never downloads binaries silently behind your back.
+  - Never downloads binaries silently in the background.
   - Automatically collapses the dependency banner into a single-line status indicator once `scrcpy` and `adb` are detected.
-  - When missing, provides transparent buttons to install via official package managers (`winget`, `brew`, `apt`/`pacman`/`dnf`), select a portable folder, or open official GitHub Releases.
+  - When missing, provides transparent buttons to:
+    - Install both `scrcpy` + `adb` via official package managers (`winget`, `brew`, `apt`/`pacman`/`dnf`) or an automatic **PowerShell Official Release Installer** fallback (for Windows systems without `winget`).
+    - Select a custom portable folder (`Folder...`).
+    - Open official [scrcpy GitHub Releases](https://github.com/Genymobile/scrcpy/releases) or [Official Google ADB Platform-Tools](https://developer.android.com/tools/releases/platform-tools).
 - **Smart Presets + Automatic `Custom` Profile**:
   - 6 one-click presets (`Standard`, `Gaming 120`, `Screen Off`, `Virtual Desk`, `Camera`, `OTG Input`) + `Custom`.
   - Remembers your last selected preset across launches.
@@ -25,17 +28,30 @@ Works natively on **Windows**, **Linux**, and **macOS** using only Python's stan
 ## How to Run
 
 ### 1. Download Standalone Executable (No Python Required)
-Grab the latest pre-built executable for Windows (`scrcpy-cpl.exe`), Linux, or macOS from the **Actions Artifacts** or **Releases** tab.
+Grab the latest pre-built executable for **Windows** (`scrcpy-cpl.exe`), **Linux** (`scrcpy-cpl`), or **macOS** (`scrcpy-cpl-macos.zip`) from the [**Releases**](https://github.com/bimoich/scrcpy-cpl/releases) page.
 
-### 2. Run Directly via Python
+> **Windows SmartScreen Note**: Because this is a free open-source binary without a paid commercial code-signing certificate, Windows Defender SmartScreen may show a *"Windows protected your PC"* prompt when downloaded via a web browser. Click **More info** -> **Run anyway**, or download and launch directly via PowerShell (which avoids browser Mark-of-the-Web flags):
+> ```powershell
+> irm https://github.com/bimoich/scrcpy-cpl/releases/latest/download/scrcpy-cpl.exe -OutFile scrcpy-cpl.exe; .\scrcpy-cpl.exe
+> ```
+
+### 2. Run Directly from Source (Python 3)
 ```bash
 python3 scrcpy_cpl.py
 ```
 - **Windows**: Double-click `run_windows.bat`
 - **Linux / macOS**: Run `./run_unix.sh`
 
-### 3. Build Standalone `.exe` Locally
+*(Note for Linux users: ensure `python3-tk` is installed via your package manager, e.g., `sudo apt install python3-tk`).*
+
+### 3. Build Standalone Executable Locally
 ```bash
 python generate_icon.py
-pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_cpl.py
+pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --version-file=version_info.txt --name "scrcpy-cpl" scrcpy_cpl.py
 ```
+
+---
+
+## License
+
+Licensed under the [MIT License](LICENSE). Copyright (c) 2026 **bmolab**.

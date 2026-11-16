@@ -16,9 +16,11 @@ from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
 APP_NAME = "scrcpy-cpl"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.4"
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".scrcpy_cpl.json")
+PORTABLE_INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".scrcpy-cpl-bin")
 OFFICIAL_RELEASES_URL = "https://github.com/Genymobile/scrcpy/releases"
+OFFICIAL_ADB_URL = "https://developer.android.com/tools/releases/platform-tools"
 
 IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
@@ -122,10 +124,12 @@ I18N = {
         "folder_btn": "Folder...",
         "recheck_btn": "Re-check",
         "missing_desc": "No silent downloads. Install via official package manager or select your portable folder:",
-        "install_winget": "Install via Winget (Terminal)",
-        "install_brew": "Install via Homebrew (Terminal)",
+        "install_winget": "Install scrcpy + adb (Winget)",
+        "install_ps_github": "Install scrcpy + adb (PowerShell)",
+        "install_brew": "Install scrcpy + adb (Homebrew)",
         "install_linux": "Linux Install Commands",
-        "github_releases": "GitHub Releases ↗",
+        "github_releases": "scrcpy GitHub ↗",
+        "official_adb": "Official Google ADB ↗",
         "select_folder_title": "Select folder containing scrcpy / adb",
         "target_device": "Target Android Device",
         "wireless_btn": "Wireless TCP/IP",
@@ -167,6 +171,8 @@ I18N = {
         "wifi_conn_btn": "Connect ADB",
         "winget_confirm_title": "Official Install via Winget",
         "winget_confirm_msg": "Open CMD and run the official Microsoft Winget command?\n\n    {cmd}\n\nThis installs official scrcpy and adb from Genymobile.",
+        "ps_confirm_title": "Official GitHub Release Install (PowerShell)",
+        "ps_confirm_msg": "Winget was not detected on this Windows system.\n\nOpen a visible PowerShell window to fetch and extract the latest official release directly from Genymobile/scrcpy on GitHub into:\n\n    {dest}\n\n(Includes both official scrcpy.exe and adb.exe). Continue?",
     },
     "id": {
         "scrcpy_ok": "scrcpy terdeteksi",
@@ -176,10 +182,12 @@ I18N = {
         "folder_btn": "Pilih Folder...",
         "recheck_btn": "Cek Ulang",
         "missing_desc": "Tidak mengunduh diam-diam. Install resmi via package manager atau pilih folder portable:",
-        "install_winget": "Install via Winget (Terminal)",
-        "install_brew": "Install via Homebrew (Terminal)",
+        "install_winget": "Install scrcpy + adb (Winget)",
+        "install_ps_github": "Install scrcpy + adb (PowerShell)",
+        "install_brew": "Install scrcpy + adb (Homebrew)",
         "install_linux": "Perintah Install Linux",
-        "github_releases": "GitHub Resmi ↗",
+        "github_releases": "GitHub scrcpy ↗",
+        "official_adb": "Google ADB Resmi ↗",
         "select_folder_title": "Pilih folder tempat scrcpy / adb berada",
         "target_device": "Perangkat Android",
         "wireless_btn": "Koneksi WiFi",
@@ -221,6 +229,8 @@ I18N = {
         "wifi_conn_btn": "Sambungkan ADB",
         "winget_confirm_title": "Install Resmi via Winget",
         "winget_confirm_msg": "Buka CMD dan jalankan perintah resmi Microsoft Winget?\n\n    {cmd}\n\nPaket ini berisi scrcpy dan adb resmi dari Genymobile.",
+        "ps_confirm_title": "Install Rilis Resmi GitHub (PowerShell)",
+        "ps_confirm_msg": "Winget tidak ditemukan di Windows kamu.\n\nBuka jendela PowerShell transparan untuk mengunduh & mengekstrak rilis resmi terbaru langsung dari GitHub Genymobile/scrcpy ke:\n\n    {dest}\n\n(Sudah termasuk scrcpy.exe dan adb.exe resmi). Lanjutkan?",
     },
 }
 
@@ -547,11 +557,24 @@ class ScrcpyCplApp:
             relief="solid",
             bd=1,
             font=("Segoe UI", 8),
-            padx=10,
+            padx=9,
             pady=3,
             cursor="hand2",
         )
-        self.btn_github.pack(side="left")
+        self.btn_github.pack(side="left", padx=(0, 6))
+
+        self.btn_adb_web = tk.Button(
+            self.missing_btn_row,
+            text="",
+            command=lambda: webbrowser.open(OFFICIAL_ADB_URL),
+            relief="solid",
+            bd=1,
+            font=("Segoe UI", 8),
+            padx=9,
+            pady=3,
+            cursor="hand2",
+        )
+        self.btn_adb_web.pack(side="left")
 
         # 2. Target Android Device Card
         self.dev_card = tk.Frame(self.body, highlightthickness=1, padx=10, pady=8)
@@ -925,6 +948,7 @@ class ScrcpyCplApp:
         self.lbl_missing_desc.configure(text=self.t("missing_desc"))
         self.btn_pkg_install.configure(text=self.get_os_install_button_label())
         self.btn_github.configure(text=self.t("github_releases"))
+        self.btn_adb_web.configure(text=self.t("official_adb"))
 
         self.lbl_dev_title.configure(text=self.t("target_device"))
         self.btn_wifi.configure(text=self.t("wireless_btn"))
@@ -1096,12 +1120,13 @@ class ScrcpyCplApp:
         if found:
             return found
 
-        # 5. Windows Winget / Scoop / Chocolatey package locations
+        # 5. Windows Winget / Scoop / Chocolatey / Portable install locations
         if IS_WINDOWS:
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             user_profile = os.environ.get("USERPROFILE", "")
             program_data = os.environ.get("ProgramData", "")
             search_roots = [
+                PORTABLE_INSTALL_DIR,
                 os.path.join(local_app_data, "Microsoft", "WinGet", "Links"),
                 os.path.join(local_app_data, "Microsoft", "WinGet", "Packages"),
                 os.path.join(user_profile, "scoop", "shims"),
@@ -1113,15 +1138,11 @@ class ScrcpyCplApp:
                 direct = os.path.join(root_dir, exe_name)
                 if os.path.isfile(direct):
                     return direct
-                if root_dir.endswith("Packages"):
+                if root_dir == PORTABLE_INSTALL_DIR or root_dir.endswith("Packages"):
                     try:
-                        for entry in os.listdir(root_dir):
-                            low = entry.lower()
-                            if "scrcpy" in low or "platformtools" in low or "adb" in low:
-                                pkg_dir = os.path.join(root_dir, entry)
-                                for dirpath, _, filenames in os.walk(pkg_dir):
-                                    if exe_name in filenames:
-                                        return os.path.join(dirpath, exe_name)
+                        for dirpath, _, filenames in os.walk(root_dir):
+                            if exe_name in filenames:
+                                return os.path.join(dirpath, exe_name)
                     except Exception:
                         pass
 
@@ -1172,6 +1193,7 @@ class ScrcpyCplApp:
         self.btn_recheck.configure(bg=bg, fg=th["fg_muted"], activebackground=bg)
         self.btn_pkg_install.configure(bg=th["accent"], fg=th["accent_fg"], activebackground=th["accent"])
         self.btn_github.configure(bg=th["bg_card"], fg=th["fg_main"], activebackground=th["border"])
+        self.btn_adb_web.configure(bg=th["bg_card"], fg=th["fg_main"], activebackground=th["border"])
 
         if both_ok:
             self.btn_start.configure(state="normal", bg=th["accent"], fg=th["accent_fg"])
@@ -1205,25 +1227,63 @@ class ScrcpyCplApp:
             self.save_config()
             self.on_recheck()
 
+    def has_winget(self) -> bool:
+        if not IS_WINDOWS:
+            return False
+        if shutil.which("winget"):
+            return True
+        win_apps_winget = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "winget.exe")
+        return os.path.isfile(win_apps_winget)
+
     def get_os_install_button_label(self) -> str:
         if IS_WINDOWS:
-            return self.t("install_winget")
+            return self.t("install_winget") if self.has_winget() else self.t("install_ps_github")
         elif IS_MAC:
             return self.t("install_brew")
         return self.t("install_linux")
 
     def run_official_package_install(self):
         if IS_WINDOWS:
-            cmd_str = "winget install --exact --id Genymobile.scrcpy"
-            confirm = messagebox.askyesno(
-                self.t("winget_confirm_title"),
-                self.t("winget_confirm_msg").format(cmd=cmd_str),
-            )
-            if confirm:
-                subprocess.Popen(
-                    ["cmd.exe", "/k", "winget", "install", "--exact", "--id", "Genymobile.scrcpy"],
-                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+            if self.has_winget():
+                cmd_str = "winget install --exact --id Genymobile.scrcpy"
+                confirm = messagebox.askyesno(
+                    self.t("winget_confirm_title"),
+                    self.t("winget_confirm_msg").format(cmd=cmd_str),
                 )
+                if confirm:
+                    subprocess.Popen(
+                        ["cmd.exe", "/k", "winget", "install", "--exact", "--id", "Genymobile.scrcpy"],
+                        creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    )
+            else:
+                confirm = messagebox.askyesno(
+                    self.t("ps_confirm_title"),
+                    self.t("ps_confirm_msg").format(dest=PORTABLE_INSTALL_DIR),
+                )
+                if confirm:
+                    ps_script = (
+                        "$ErrorActionPreference = 'Stop'; "
+                        "Write-Host '=== Official Genymobile/scrcpy Release Installer ===' -ForegroundColor Cyan; "
+                        "Write-Host 'Fetching latest release metadata from GitHub API...'; "
+                        "$rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/Genymobile/scrcpy/releases/latest'; "
+                        "$asset = $rel.assets | Where-Object { $_.name -match 'scrcpy-win64-.*\\.zip$' } | Select-Object -First 1; "
+                        "if (-not $asset) { throw 'Could not find win64 zip asset in latest release.' }; "
+                        "$zipPath = Join-Path $env:TEMP $asset.name; "
+                        "Write-Host ('Downloading ' + $asset.name + ' from ' + $asset.browser_download_url + '...') -ForegroundColor Yellow; "
+                        "Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath; "
+                        f"$dest = '{PORTABLE_INSTALL_DIR}'; "
+                        "if (-not (Test-Path $dest)) { New-Item -ItemType Directory -Path $dest | Out-Null }; "
+                        "Write-Host ('Extracting to ' + $dest + '...') -ForegroundColor Yellow; "
+                        "Expand-Archive -Path $zipPath -DestinationPath $dest -Force; "
+                        "Remove-Item $zipPath -Force -ErrorAction SilentlyContinue; "
+                        "Write-Host ''; "
+                        "Write-Host 'SUCCESS! Official scrcpy and adb installed.' -ForegroundColor Green; "
+                        "Write-Host 'Click [Re-check] in scrcpy-cpl to start mirroring!' -ForegroundColor Green;"
+                    )
+                    subprocess.Popen(
+                        ["powershell.exe", "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                        creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    )
         elif IS_MAC:
             cmd_str = "brew install scrcpy android-platform-tools"
             confirm = messagebox.askyesno("Homebrew", f"Run in Terminal?\n\n    {cmd_str}")

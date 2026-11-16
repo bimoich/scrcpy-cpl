@@ -49,7 +49,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller pillow
 
-      - name: Generate Custom .ico and Build Executable
+      - name: Generate Custom .ico and Build Executable (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          python generate_icon.py
+          pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --version-file=version_info.txt --name "scrcpy-cpl" scrcpy_cpl.py
+
+      - name: Generate Custom .ico and Build Executable (Linux / macOS)
+        if: runner.os != 'Windows'
         run: |
           python generate_icon.py
           pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_cpl.py

@@ -19,7 +19,7 @@ python generate_icon.py
 
 echo.
 echo [3/3] Compiling scrcpy_cpl.py into standalone scrcpy-cpl.exe...
-python -m PyInstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_cpl.py
+python -m PyInstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --version-file=version_info.txt --name "scrcpy-cpl" scrcpy_cpl.py
 
 echo.
 if exist "dist\scrcpy-cpl.exe" (

@@ -29,7 +29,7 @@ Grab the latest pre-built executable for Windows (`scrcpy-cpl.exe`), Linux, or m
 
 ### 2. Run Directly via Python
 ```bash
-python3 scrcpy_launcher.py
+python3 scrcpy_cpl.py
 ```
 - **Windows**: Double-click `run_windows.bat`
 - **Linux / macOS**: Run `./run_unix.sh`
@@ -37,5 +37,5 @@ python3 scrcpy_launcher.py
 ### 3. Build Standalone `.exe` Locally
 ```bash
 python generate_icon.py
-pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_launcher.py
+pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_cpl.py
 ```

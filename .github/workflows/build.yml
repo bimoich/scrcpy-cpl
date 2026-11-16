@@ -44,15 +44,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-tk
 
-      - name: Install PyInstaller
+      - name: Install PyInstaller and Pillow (for macOS .icns conversion)
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller
+          pip install pyinstaller pillow
 
       - name: Generate Custom .ico and Build Executable
         run: |
           python generate_icon.py
-          pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_launcher.py
+          pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --name "scrcpy-cpl" scrcpy_cpl.py
 
       - name: Package macOS .app bundle into zip
         if: runner.os == 'macOS'

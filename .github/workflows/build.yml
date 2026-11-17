@@ -44,16 +44,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-tk
 
-      - name: Install PyInstaller and Pillow (for macOS .icns conversion)
+      - name: Install Build Tools (Nuitka on Windows, PyInstaller on Linux/macOS)
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller pillow
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            pip install nuitka zstandard
+          else
+            pip install pyinstaller pillow
+          fi
+        shell: bash
 
-      - name: Generate Custom .ico and Build Executable (Windows)
+      - name: Generate Custom .ico and Build Native Executable (Windows via Nuitka)
         if: runner.os == 'Windows'
         run: |
           python generate_icon.py
-          pyinstaller --onefile --windowed --clean --icon=scrcpy_cpl.ico --version-file=version_info.txt --name "scrcpy-cpl" scrcpy_cpl.py
+          python -m nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --windows-icon-from-ico=scrcpy_cpl.ico --company-name="bmolab" --product-name="scrcpy-cpl" --file-version="1.2.1.0" --product-version="1.2.1.0" --file-description="scrcpy-cpl Control Panel Applet" --output-dir=dist --output-filename=scrcpy-cpl.exe scrcpy_cpl.py
 
       - name: Generate Custom .ico and Build Executable (Linux / macOS)
         if: runner.os != 'Windows'

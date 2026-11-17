@@ -5,7 +5,6 @@ A lightweight, zero-dependency, cross-platform GUI control panel for scrcpy (v5.
 Works natively on Windows, Linux, and macOS using Python's built-in tkinter.
 """
 
-import ctypes
 import json
 import os
 import platform
@@ -19,7 +18,7 @@ from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
 APP_NAME = "scrcpy-cpl"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".scrcpy_cpl.json")
 PORTABLE_INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".scrcpy-cpl-bin")
 OFFICIAL_RELEASES_URL = "https://github.com/Genymobile/scrcpy/releases"
@@ -308,19 +307,6 @@ THEMES = {
         "missing_border": "#7f1d1d",
     },
 }
-
-
-def enable_windows_high_dpi():
-    """Enables crisp High-DPI font rendering on Windows (125% / 150% scaling)."""
-    if not IS_WINDOWS:
-        return
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
 
 
 def create_jade_cpl_photoimage(size: int = 32) -> tk.PhotoImage:
@@ -1637,7 +1623,7 @@ class ScrcpyCplApp:
                         "Write-Host 'Click [Re-check] in scrcpy-cpl to start mirroring!' -ForegroundColor Green;"
                     )
                     subprocess.Popen(
-                        ["powershell.exe", "-NoExit", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                        ["powershell.exe", "-NoExit", "-Command", ps_script],
                         creationflags=subprocess.CREATE_NEW_CONSOLE,
                     )
         elif IS_MAC:
@@ -2005,7 +1991,6 @@ class ScrcpyCplApp:
 
 
 def main():
-    enable_windows_high_dpi()
     root = tk.Tk()
     ScrcpyCplApp(root)
     root.mainloop()

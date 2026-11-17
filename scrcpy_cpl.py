@@ -5,18 +5,21 @@ A lightweight, zero-dependency, cross-platform GUI control panel for scrcpy (v5.
 Works natively on Windows, Linux, and macOS using Python's built-in tkinter.
 """
 
+import ctypes
 import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
 APP_NAME = "scrcpy-cpl"
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.2.0"
 CONFIG_FILE = os.path.join(os.path.expanduser("~"), ".scrcpy_cpl.json")
 PORTABLE_INSTALL_DIR = os.path.join(os.path.expanduser("~"), ".scrcpy-cpl-bin")
 OFFICIAL_RELEASES_URL = "https://github.com/Genymobile/scrcpy/releases"
@@ -26,93 +29,72 @@ IS_WINDOWS = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
 
-WINDOW_WIDTH = 540
+WINDOW_WIDTH = 550
+ADV_TAB_HEIGHT = 172
+
+BASE_STATE = {
+    "source": "display",
+    "max_size": "1920",
+    "fps": "60",
+    "bitrate": "Default",
+    "codec": "h265",
+    "orientation": "Default",
+    "camera_facing": "Default",
+    "flex_display": False,
+    "record": False,
+    "audio_source": "output",
+    "audio_codec": "opus",
+    "no_audio": False,
+    "audio_dup": False,
+    "kb_mode": "sdk",
+    "mouse_mode": "sdk",
+    "gamepad_mode": "disabled",
+    "no_control": False,
+    "screen_off": False,
+    "stay_awake": True,
+    "power_off_close": False,
+    "show_touches": False,
+    "always_on_top": False,
+    "fullscreen": False,
+    "borderless": False,
+    "no_screensaver": False,
+}
+
+
+def make_preset(**overrides) -> dict:
+    d = dict(BASE_STATE)
+    d.update(overrides)
+    return d
+
 
 PRESET_DEFS = {
-    "standard": {
-        "source": "display",
-        "max_size": "1920",
-        "fps": "60",
-        "codec": "h265",
-        "screen_off": False,
-        "stay_awake": True,
-        "no_audio": False,
-        "uhid_kb": False,
-        "uhid_gamepad": False,
-        "always_on_top": False,
-        "fullscreen": False,
-        "record": False,
-    },
-    "gaming": {
-        "source": "display",
-        "max_size": "1920",
-        "fps": "120",
-        "codec": "h265",
-        "screen_off": False,
-        "stay_awake": True,
-        "no_audio": False,
-        "uhid_kb": True,
-        "uhid_gamepad": True,
-        "always_on_top": False,
-        "fullscreen": False,
-        "record": False,
-    },
-    "privacy": {
-        "source": "display",
-        "max_size": "1920",
-        "fps": "60",
-        "codec": "h265",
-        "screen_off": True,
-        "stay_awake": True,
-        "no_audio": False,
-        "uhid_kb": False,
-        "uhid_gamepad": False,
-        "always_on_top": False,
-        "fullscreen": False,
-        "record": False,
-    },
-    "dex": {
-        "source": "new-display",
-        "max_size": "1920",
-        "fps": "60",
-        "codec": "h265",
-        "screen_off": False,
-        "stay_awake": True,
-        "no_audio": False,
-        "uhid_kb": True,
-        "uhid_gamepad": False,
-        "always_on_top": False,
-        "fullscreen": False,
-        "record": False,
-    },
-    "camera": {
-        "source": "camera",
-        "max_size": "1920",
-        "fps": "60",
-        "codec": "h265",
-        "screen_off": False,
-        "stay_awake": False,
-        "no_audio": False,
-        "uhid_kb": False,
-        "uhid_gamepad": False,
-        "always_on_top": False,
-        "fullscreen": False,
-        "record": False,
-    },
-    "otg": {
-        "source": "otg",
-        "max_size": "0",
-        "fps": "60",
-        "codec": "h265",
-        "screen_off": False,
-        "stay_awake": False,
-        "no_audio": False,
-        "uhid_kb": False,
-        "uhid_gamepad": False,
-        "always_on_top": False,
-        "fullscreen": False,
-        "record": False,
-    },
+    "standard": make_preset(),
+    "gaming": make_preset(
+        fps="120",
+        bitrate="16M",
+        kb_mode="uhid",
+        gamepad_mode="uhid",
+    ),
+    "privacy": make_preset(
+        screen_off=True,
+        stay_awake=True,
+        power_off_close=True,
+    ),
+    "dex": make_preset(
+        source="new-display",
+        flex_display=True,
+        kb_mode="uhid",
+    ),
+    "camera": make_preset(
+        source="camera",
+        camera_facing="back",
+        stay_awake=False,
+    ),
+    "otg": make_preset(
+        source="otg",
+        max_size="0",
+        stay_awake=False,
+    ),
 }
 
 I18N = {
@@ -145,24 +127,45 @@ I18N = {
         "p_camera": "Camera",
         "p_otg": "OTG Input",
         "p_custom": "Custom",
-        "adv_title": "Advanced Video & Control Settings",
+        "adv_title": "Advanced Video, Audio & Control Settings",
         "expand": "[+] Expand",
         "collapse": "[-] Collapse",
+        "tab_video": "Video & Display",
+        "tab_audio": "Audio & Input",
+        "tab_window": "Device & Window",
         "lbl_source": "Source",
-        "lbl_res": "Max Size",
+        "lbl_res": "Max Size (-m)",
         "lbl_fps": "Max FPS",
-        "lbl_codec": "Codec",
+        "lbl_bitrate": "Bit Rate (-b)",
+        "lbl_codec": "Video Codec",
+        "lbl_orient": "Orientation",
+        "lbl_cam_face": "Camera Facing",
+        "chk_flex": "Flex Virtual Display (-x / resize dynamically)",
+        "chk_rec": "Record to MP4:",
+        "btn_browse_rec": "Save As...",
+        "lbl_aud_src": "Audio Source",
+        "lbl_aud_codec": "Audio Codec",
+        "lbl_kb_mode": "Keyboard Mode",
+        "lbl_mouse_mode": "Mouse Mode",
+        "lbl_gp_mode": "Gamepad Mode",
+        "chk_no_audio": "Disable Audio (--no-audio)",
+        "chk_aud_dup": "Keep Audio on Phone + PC (--audio-dup, Android 13+)",
+        "chk_no_ctrl": "Read-Only / No Control (-n / --no-control)",
         "chk_screen_off": "Turn physical screen off (-S)",
-        "chk_stay_awake": "Stay awake (--stay-awake)",
-        "chk_no_audio": "Disable audio (--no-audio)",
-        "chk_uhid_kb": "Physical UHID Keyboard (-K)",
-        "chk_uhid_gp": "Physical UHID Gamepad (-G)",
-        "chk_top": "Always on top (--always-on-top)",
-        "chk_full": "Fullscreen (-f)",
-        "chk_rec": "Record to MP4 (--record)",
+        "chk_stay_awake": "Stay awake while plugged in (-w)",
+        "chk_poff_close": "Power off screen on close (--power-off-on-close)",
+        "chk_touches": "Show physical finger touches (-t)",
+        "chk_top": "Window always on top (--always-on-top)",
+        "chk_full": "Start in fullscreen (-f)",
+        "chk_borderless": "Borderless window (--window-borderless)",
+        "chk_nosaver": "Disable PC screensaver (--disable-screensaver)",
         "lbl_extra": "Extra Flags:",
+        "copy_btn": "Copy",
+        "copied_btn": "Copied ✓",
         "auto_close": "Close panel after launch (0 MB RAM)",
         "start_btn": "Start Mirroring",
+        "launch_err_title": "scrcpy Failed to Start",
+        "launch_err_prefix": "scrcpy exited immediately with an error:\n\n",
         "wifi_title": "Wireless Connection (ADB TCP/IP)",
         "wifi_header": "Connect Android over Wi-Fi",
         "wifi_opt1": "Option 1: Connect via USB first, then append automatic --tcpip flag:",
@@ -203,24 +206,45 @@ I18N = {
         "p_camera": "Kamera",
         "p_otg": "Mode OTG",
         "p_custom": "Kustom",
-        "adv_title": "Pengaturan Lanjutan Video & Kontrol",
+        "adv_title": "Pengaturan Lanjutan Video, Audio & Kontrol",
         "expand": "[+] Buka",
         "collapse": "[-] Tutup",
+        "tab_video": "Video & Layar",
+        "tab_audio": "Audio & Input",
+        "tab_window": "Perangkat & Jendela",
         "lbl_source": "Sumber",
-        "lbl_res": "Resolusi",
+        "lbl_res": "Resolusi (-m)",
         "lbl_fps": "Maks FPS",
-        "lbl_codec": "Codec",
+        "lbl_bitrate": "Bit Rate (-b)",
+        "lbl_codec": "Codec Video",
+        "lbl_orient": "Orientasi",
+        "lbl_cam_face": "Arah Kamera",
+        "chk_flex": "Flex Virtual Display (-x / ukuran layar dinamis)",
+        "chk_rec": "Rekam MP4:",
+        "btn_browse_rec": "Simpan Ke...",
+        "lbl_aud_src": "Sumber Audio",
+        "lbl_aud_codec": "Codec Audio",
+        "lbl_kb_mode": "Mode Keyboard",
+        "lbl_mouse_mode": "Mode Mouse",
+        "lbl_gp_mode": "Mode Gamepad",
+        "chk_no_audio": "Matikan Suara (--no-audio)",
+        "chk_aud_dup": "Suara Tetap Keluar di HP + PC (--audio-dup, Android 13+)",
+        "chk_no_ctrl": "Hanya Lihat / Tanpa Kontrol (-n / --no-control)",
         "chk_screen_off": "Matikan layar fisik HP (-S)",
-        "chk_stay_awake": "Cegah HP terkunci (--stay-awake)",
-        "chk_no_audio": "Matikan suara (--no-audio)",
-        "chk_uhid_kb": "Keyboard Fisik UHID (-K)",
-        "chk_uhid_gp": "Gamepad Fisik UHID (-G)",
-        "chk_top": "Selalu di atas (--always-on-top)",
-        "chk_full": "Layar penuh (-f)",
-        "chk_rec": "Rekam ke MP4 (--record)",
+        "chk_stay_awake": "Cegah HP terkunci saat dicas (-w)",
+        "chk_poff_close": "Matikan layar HP saat keluar (--power-off-on-close)",
+        "chk_touches": "Tampilkan titik sentuhan jari (-t)",
+        "chk_top": "Jendela selalu di atas (--always-on-top)",
+        "chk_full": "Langsung layar penuh (-f)",
+        "chk_borderless": "Jendela tanpa bingkai (--window-borderless)",
+        "chk_nosaver": "Cegah screensaver PC (--disable-screensaver)",
         "lbl_extra": "Flag Ekstra:",
+        "copy_btn": "Salin",
+        "copied_btn": "Tersalin ✓",
         "auto_close": "Tutup panel setelah jalan (0 MB RAM)",
         "start_btn": "Mulai Mirroring",
+        "launch_err_title": "scrcpy Gagal Dijalankan",
+        "launch_err_prefix": "scrcpy langsung berhenti karena kendala berikut:\n\n",
         "wifi_title": "Koneksi Wireless (ADB TCP/IP)",
         "wifi_header": "Sambungkan Android via Wi-Fi",
         "wifi_opt1": "Opsi 1: Colok USB dulu, lalu gunakan flag otomatis --tcpip:",
@@ -243,6 +267,7 @@ THEMES = {
         "bg_cmd": "#f5f5f5",
         "fg_main": "#1c1c1c",
         "fg_muted": "#616161",
+        "fg_disabled": "#a1a1aa",
         "border": "#e0e0e0",
         "input_border": "#d1d1d1",
         "accent": "#1f7a54",
@@ -266,6 +291,7 @@ THEMES = {
         "bg_cmd": "#09090b",
         "fg_main": "#f4f4f5",
         "fg_muted": "#a1a1aa",
+        "fg_disabled": "#52525b",
         "border": "#27272a",
         "input_border": "#27272a",
         "accent": "#1f7a54",
@@ -284,10 +310,23 @@ THEMES = {
 }
 
 
+def enable_windows_high_dpi():
+    """Enables crisp High-DPI font rendering on Windows (125% / 150% scaling)."""
+    if not IS_WINDOWS:
+        return
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 def create_jade_cpl_photoimage(size: int = 32) -> tk.PhotoImage:
     """
-    Renders the custom scrcpy-cpl icon (Option 1: Official scrcpy Jade & Charcoal,
-    combining the Style 2 Phone Mirror Frame + Style 1 Control Panel Sliders)
+    Renders the custom scrcpy-cpl icon (Official scrcpy Jade & Charcoal,
+    combining the Phone Mirror Frame + 3 Control Panel Sliders)
     directly into a tk.PhotoImage with zero external asset dependencies.
     """
     img = tk.PhotoImage(width=size, height=size)
@@ -301,26 +340,20 @@ def create_jade_cpl_photoimage(size: int = 32) -> tk.PhotoImage:
         if ix1 > ix0 and iy1 > iy0:
             img.put(color, to=(ix0, iy0, ix1, iy1))
 
-    # 1. Rounded Jade Base (#1f7a54) with subtle border (#166534)
     fill_rect(1, 1, 23, 23, "#166534")
     fill_rect(2, 2, 22, 22, "#1f7a54")
 
-    # 2. Style 2: Phone Mirror Frame (white outline + dark jade screen)
     fill_rect(3.5, 3.0, 14.5, 20.5, "#ffffff")
     fill_rect(4.8, 4.3, 13.2, 19.2, "#134e35")
-    # Speaker notch
     fill_rect(7.2, 5.2, 10.8, 6.1, "#ffffff")
 
-    # 3. Style 1: Control Panel Sliders Badge overlapping right (#18181b with white border)
     fill_rect(9.2, 7.5, 21.2, 19.5, "#ffffff")
     fill_rect(10.2, 8.5, 20.2, 18.5, "#18181b")
 
-    # Slider tracks (#71717a)
     fill_rect(11.6, 10.4, 18.8, 11.4, "#71717a")
     fill_rect(11.6, 13.1, 18.8, 14.1, "#71717a")
     fill_rect(11.6, 15.8, 18.8, 16.8, "#71717a")
 
-    # Slider knobs (Jade green #4ade80 and crisp white #ffffff)
     fill_rect(13.0, 9.7, 15.2, 12.1, "#4ade80")
     fill_rect(16.0, 12.4, 18.2, 14.8, "#ffffff")
     fill_rect(13.8, 15.1, 16.0, 17.5, "#4ade80")
@@ -346,45 +379,62 @@ class ScrcpyCplApp:
         self.custom_bin_dir = self.config.get("custom_bin_dir", "")
         self.scrcpy_path = None
         self.adb_path = None
-        self.scrcpy_version = ""
         self.devices = []
 
-        # Saved custom preset state
-        default_custom = dict(PRESET_DEFS["standard"])
-        self.custom_profile = self.config.get("custom_profile", default_custom)
+        saved_custom = dict(BASE_STATE)
+        saved_custom.update(self.config.get("custom_profile", {}))
+        self.custom_profile = saved_custom
 
-        # Active preset: None only on very first launch if no config exists yet;
-        # once user selects anything, it is persisted and auto-selected on future opens.
         self.active_preset = self.config.get("active_preset", None)
         self.adv_expanded = False
+        self.active_adv_tab = "video"
         self._suppress_trace = False
+        self._centered_once = False
 
-        # Tkinter Variables
         init_state = (
             self.custom_profile
             if self.active_preset == "custom"
             else PRESET_DEFS.get(self.active_preset or "standard", PRESET_DEFS["standard"])
         )
 
+        # Tkinter Variables
         self.var_device = tk.StringVar()
+
+        # Tab 1: Video & Display
         self.var_source = tk.StringVar(value=init_state.get("source", "display"))
         self.var_max_size = tk.StringVar(value=init_state.get("max_size", "1920"))
         self.var_fps = tk.StringVar(value=init_state.get("fps", "60"))
+        self.var_bitrate = tk.StringVar(value=init_state.get("bitrate", "Default"))
         self.var_codec = tk.StringVar(value=init_state.get("codec", "h265"))
-
-        self.var_screen_off = tk.BooleanVar(value=init_state.get("screen_off", False))
-        self.var_stay_awake = tk.BooleanVar(value=init_state.get("stay_awake", True))
-        self.var_no_audio = tk.BooleanVar(value=init_state.get("no_audio", False))
-        self.var_uhid_kb = tk.BooleanVar(value=init_state.get("uhid_kb", False))
-        self.var_uhid_gamepad = tk.BooleanVar(value=init_state.get("uhid_gamepad", False))
-        self.var_always_on_top = tk.BooleanVar(value=init_state.get("always_on_top", False))
-        self.var_fullscreen = tk.BooleanVar(value=init_state.get("fullscreen", False))
+        self.var_orientation = tk.StringVar(value=init_state.get("orientation", "Default"))
+        self.var_camera_facing = tk.StringVar(value=init_state.get("camera_facing", "Default"))
+        self.var_flex_display = tk.BooleanVar(value=init_state.get("flex_display", False))
         self.var_record = tk.BooleanVar(value=init_state.get("record", False))
         self.var_record_path = tk.StringVar(value=self.config.get("record_path", "scrcpy_capture.mp4"))
+
+        # Tab 2: Audio & Input
+        self.var_audio_source = tk.StringVar(value=init_state.get("audio_source", "output"))
+        self.var_audio_codec = tk.StringVar(value=init_state.get("audio_codec", "opus"))
+        self.var_no_audio = tk.BooleanVar(value=init_state.get("no_audio", False))
+        self.var_audio_dup = tk.BooleanVar(value=init_state.get("audio_dup", False))
+        self.var_kb_mode = tk.StringVar(value=init_state.get("kb_mode", "sdk"))
+        self.var_mouse_mode = tk.StringVar(value=init_state.get("mouse_mode", "sdk"))
+        self.var_gamepad_mode = tk.StringVar(value=init_state.get("gamepad_mode", "disabled"))
+        self.var_no_control = tk.BooleanVar(value=init_state.get("no_control", False))
+
+        # Tab 3: Device & Window
+        self.var_screen_off = tk.BooleanVar(value=init_state.get("screen_off", False))
+        self.var_stay_awake = tk.BooleanVar(value=init_state.get("stay_awake", True))
+        self.var_power_off_close = tk.BooleanVar(value=init_state.get("power_off_close", False))
+        self.var_show_touches = tk.BooleanVar(value=init_state.get("show_touches", False))
+        self.var_always_on_top = tk.BooleanVar(value=init_state.get("always_on_top", False))
+        self.var_fullscreen = tk.BooleanVar(value=init_state.get("fullscreen", False))
+        self.var_borderless = tk.BooleanVar(value=init_state.get("borderless", False))
+        self.var_no_screensaver = tk.BooleanVar(value=init_state.get("no_screensaver", False))
         self.var_extra_args = tk.StringVar(value=self.config.get("extra_args", ""))
+
         self.var_auto_close = tk.BooleanVar(value=self.config.get("auto_close", True))
 
-        # Set window & header icons
         try:
             self.icon_img_32 = create_jade_cpl_photoimage(32)
             self.icon_img_28 = create_jade_cpl_photoimage(28)
@@ -403,16 +453,25 @@ class ScrcpyCplApp:
         self.apply_language()
         self.check_binaries()
         self.refresh_devices()
+        self.update_contextual_widget_states()
         self.update_mode_summary_and_preview()
-        self.lock_window_width()
+        self.lock_window_width(center=True)
 
     def t(self, key: str) -> str:
         return I18N.get(self.lang, I18N["en"]).get(key, key)
 
-    def lock_window_width(self):
+    def lock_window_width(self, center: bool = False):
         self.root.update_idletasks()
         req_h = self.root.winfo_reqheight()
-        self.root.geometry(f"{WINDOW_WIDTH}x{req_h}")
+        if center and not self._centered_once:
+            self._centered_once = True
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            x = max(0, (sw - WINDOW_WIDTH) // 2)
+            y = max(0, (sh - req_h) // 2 - 30)
+            self.root.geometry(f"{WINDOW_WIDTH}x{req_h}+{x}+{y}")
+        else:
+            self.root.geometry(f"{WINDOW_WIDTH}x{req_h}")
 
     # -------------------------------------------------------------------------
     # UI Construction
@@ -432,7 +491,6 @@ class ScrcpyCplApp:
         self.lbl_title = tk.Label(header_left, text=APP_NAME, font=("Segoe UI", 12, "bold"))
         self.lbl_title.pack(side="left")
 
-        # Top Right Controls: Theme Toggle + Language Selector (EN | ID)
         self.header_right = tk.Frame(self.header_frame)
         self.header_right.pack(side="right")
 
@@ -460,7 +518,7 @@ class ScrcpyCplApp:
             bd=0,
             font=("Consolas", 8, "bold"),
             width=3,
-             pady=2,
+            pady=2,
             cursor="hand2",
         )
         self.btn_lang_en.pack(side="left")
@@ -485,7 +543,7 @@ class ScrcpyCplApp:
         self.body = tk.Frame(self.root, padx=14, pady=12)
         self.body.pack(fill="both", expand=True)
 
-        # 1. Dependency Card (Collapsed 1-line strip when installed, expanded when missing)
+        # 1. Dependency Card
         self.dep_card = tk.Frame(self.body, highlightthickness=1, padx=10, pady=6)
         self.dep_card.pack(fill="x", pady=(0, 8))
 
@@ -527,7 +585,6 @@ class ScrcpyCplApp:
         )
         self.btn_folder.pack(side="right", padx=(0, 4))
 
-        # Missing Binaries Action Panel (Auto-collapsed when scrcpy + adb are installed)
         self.missing_panel = tk.Frame(self.dep_card)
         self.lbl_missing_desc = tk.Label(
             self.missing_panel, text="", font=("Segoe UI", 8), anchor="w", justify="left"
@@ -616,7 +673,7 @@ class ScrcpyCplApp:
         self.cmb_device.pack(fill="x", pady=(2, 0))
         self.cmb_device.bind("<<ComboboxSelected>>", lambda e: self.update_mode_summary_and_preview())
 
-        # 3. Operating Mode Card (Fixed uniform grid so buttons NEVER shift width)
+        # 3. Operating Mode Card
         self.mode_card = tk.Frame(self.body, highlightthickness=1, padx=10, pady=8)
         self.mode_card.pack(fill="x", pady=(0, 8))
 
@@ -629,13 +686,11 @@ class ScrcpyCplApp:
         self.lbl_mode_detail = tk.Label(self.mode_hdr, text="", font=("Consolas", 8))
         self.lbl_mode_detail.pack(side="right")
 
-        # Row 1: 4 uniform columns
         self.preset_row1 = tk.Frame(self.mode_card)
         self.preset_row1.pack(fill="x", pady=(0, 5))
         for col_idx in range(4):
             self.preset_row1.columnconfigure(col_idx, weight=1, uniform="preset_r1")
 
-        # Row 2: 3 uniform columns (Camera, OTG, Custom)
         self.preset_row2 = tk.Frame(self.mode_card)
         self.preset_row2.pack(fill="x")
         for col_idx in range(3):
@@ -676,7 +731,7 @@ class ScrcpyCplApp:
             btn.pack(fill="both", expand=True)
             self.preset_buttons[key] = (cell, btn)
 
-        # 4. Collapsible Advanced Video & Control Settings (Collapsed by default)
+        # 4. Collapsible Advanced Settings with Fixed-Height 3 Mini-Tabs
         self.adv_card = tk.Frame(self.body, highlightthickness=1, padx=10, pady=6)
         self.adv_card.pack(fill="x", pady=(0, 8))
 
@@ -694,61 +749,178 @@ class ScrcpyCplApp:
 
         self.adv_body = tk.Frame(self.adv_card, pady=6)
 
-        # Dropdowns row inside Advanced
-        self.adv_grid = tk.Frame(self.adv_body)
-        self.adv_grid.pack(fill="x", pady=(2, 8))
-        for i in range(4):
-            self.adv_grid.columnconfigure(i, weight=1, uniform="adv_cols")
+        # 3 Mini-Tab Buttons inside Advanced
+        self.adv_tab_bar = tk.Frame(self.adv_body)
+        self.adv_tab_bar.pack(fill="x", pady=(0, 8))
+        for i in range(3):
+            self.adv_tab_bar.columnconfigure(i, weight=1, uniform="adv_tabs")
 
-        self.lbl_src, self.cmb_src = self._create_adv_combo(
-            self.adv_grid, 0, self.var_source, ["display", "new-display", "camera", "otg"]
-        )
-        self.lbl_res, self.cmb_res = self._create_adv_combo(
-            self.adv_grid, 1, self.var_max_size, ["0", "2560", "1920", "1280", "1024"]
-        )
-        self.lbl_fps, self.cmb_fps = self._create_adv_combo(
-            self.adv_grid, 2, self.var_fps, ["30", "60", "90", "120"]
-        )
-        self.lbl_codec, self.cmb_codec = self._create_adv_combo(
-            self.adv_grid, 3, self.var_codec, ["h265", "h264", "av1"]
-        )
-
-        # Checkboxes inside Advanced
-        self.adv_chk_frame = tk.Frame(self.adv_body)
-        self.adv_chk_frame.pack(fill="x")
-        self.adv_chk_frame.columnconfigure(0, weight=1, uniform="chk_cols")
-        self.adv_chk_frame.columnconfigure(1, weight=1, uniform="chk_cols")
-
-        chk_defs = [
-            ("chk_screen_off", self.var_screen_off, 0, 0),
-            ("chk_stay_awake", self.var_stay_awake, 0, 1),
-            ("chk_no_audio", self.var_no_audio, 1, 0),
-            ("chk_uhid_kb", self.var_uhid_kb, 1, 1),
-            ("chk_uhid_gp", self.var_uhid_gamepad, 2, 0),
-            ("chk_top", self.var_always_on_top, 2, 1),
-            ("chk_full", self.var_fullscreen, 3, 0),
-            ("chk_rec", self.var_record, 3, 1),
-        ]
-        self.adv_checkboxes = {}
-        for i18n_key, var, r, c in chk_defs:
-            cb = tk.Checkbutton(
-                self.adv_chk_frame,
+        self.adv_tab_buttons = {}
+        for idx, t_key in enumerate(["video", "audio", "window"]):
+            cell = tk.Frame(self.adv_tab_bar, highlightthickness=1, height=26)
+            cell.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 2, 0 if idx == 2 else 2))
+            cell.pack_propagate(False)
+            btn = tk.Button(
+                cell,
                 text="",
-                variable=var,
-                command=self.on_manual_setting_changed,
+                command=lambda tk_name=t_key: self.switch_adv_tab(tk_name),
+                relief="flat",
+                bd=0,
                 font=("Segoe UI", 8),
-                anchor="w",
                 cursor="hand2",
             )
-            cb.grid(row=r, column=c, sticky="ew", pady=1)
-            self.adv_checkboxes[i18n_key] = cb
+            btn.pack(fill="both", expand=True)
+            self.adv_tab_buttons[t_key] = (cell, btn)
 
-        # Extra flags row inside Advanced
-        self.extra_row = tk.Frame(self.adv_body)
-        self.extra_row.pack(fill="x", pady=(6, 0))
+        # Fixed-Height Viewport so switching tabs NEVER changes window height
+        self.adv_tab_viewport = tk.Frame(self.adv_body, height=ADV_TAB_HEIGHT)
+        self.adv_tab_viewport.pack(fill="x")
+        self.adv_tab_viewport.pack_propagate(False)
 
-        self.lbl_extra = tk.Label(self.extra_row, text="", font=("Segoe UI", 8))
-        self.lbl_extra.pack(side="left")
+        self.adv_checkboxes = {}
+        self.adv_labels = {}
+
+        # --- TAB 1: VIDEO & DISPLAY ---
+        self.tab_frame_video = tk.Frame(self.adv_tab_viewport)
+
+        self.vid_row1 = tk.Frame(self.tab_frame_video)
+        self.vid_row1.pack(fill="x", pady=(0, 6))
+        for i in range(4):
+            self.vid_row1.columnconfigure(i, weight=1, uniform="vr1")
+
+        self.adv_labels["lbl_source"], self.cmb_source = self._create_adv_combo(
+            self.vid_row1, 0, self.var_source, ["display", "new-display", "camera", "otg"]
+        )
+        self.adv_labels["lbl_res"], self.cmb_res = self._create_adv_combo(
+            self.vid_row1, 1, self.var_max_size, ["0", "2560", "1920", "1600", "1280", "1024", "800"]
+        )
+        self.adv_labels["lbl_fps"], self.cmb_fps = self._create_adv_combo(
+            self.vid_row1, 2, self.var_fps, ["15", "30", "60", "90", "120", "144"]
+        )
+        self.adv_labels["lbl_bitrate"], self.cmb_bitrate = self._create_adv_combo(
+            self.vid_row1, 3, self.var_bitrate, ["Default", "2M", "4M", "8M", "12M", "16M", "24M", "32M"]
+        )
+
+        self.vid_row2 = tk.Frame(self.tab_frame_video)
+        self.vid_row2.pack(fill="x", pady=(0, 6))
+        for i in range(3):
+            self.vid_row2.columnconfigure(i, weight=1, uniform="vr2")
+
+        self.adv_labels["lbl_codec"], self.cmb_codec = self._create_adv_combo(
+            self.vid_row2, 0, self.var_codec, ["h265", "h264", "av1"], max_col=2
+        )
+        self.adv_labels["lbl_orient"], self.cmb_orient = self._create_adv_combo(
+            self.vid_row2, 1, self.var_orientation, ["Default", "0", "90", "180", "270"], max_col=2
+        )
+        self.adv_labels["lbl_cam_face"], self.cmb_cam_face = self._create_adv_combo(
+            self.vid_row2, 2, self.var_camera_facing, ["Default", "back", "front", "external"], max_col=2
+        )
+
+        self.vid_chk_frame = tk.Frame(self.tab_frame_video)
+        self.vid_chk_frame.pack(fill="x")
+        self._add_check(self.vid_chk_frame, "chk_flex", self.var_flex_display, 0, 0)
+
+        # Record row with path entry + Save As button
+        self.rec_row = tk.Frame(self.tab_frame_video)
+        self.rec_row.pack(fill="x", pady=(2, 0))
+
+        self.cb_rec = tk.Checkbutton(
+            self.rec_row,
+            text="",
+            variable=self.var_record,
+            command=self.on_manual_setting_changed,
+            font=("Segoe UI", 8),
+            anchor="w",
+            cursor="hand2",
+        )
+        self.cb_rec.pack(side="left")
+        self.adv_checkboxes["chk_rec"] = self.cb_rec
+
+        self.ent_rec_path = tk.Entry(
+            self.rec_row,
+            textvariable=self.var_record_path,
+            relief="solid",
+            bd=1,
+            font=("Consolas", 8),
+        )
+        self.ent_rec_path.pack(side="left", fill="x", expand=True, padx=(6, 6), ipady=2)
+        self.ent_rec_path.bind("<KeyRelease>", lambda e: self.on_manual_setting_changed())
+
+        self.btn_browse_rec = tk.Button(
+            self.rec_row,
+            text="",
+            command=self.browse_record_file,
+            relief="solid",
+            bd=1,
+            font=("Segoe UI", 8),
+            padx=6,
+            pady=1,
+            cursor="hand2",
+        )
+        self.btn_browse_rec.pack(side="right")
+
+        # --- TAB 2: AUDIO & INPUT ---
+        self.tab_frame_audio = tk.Frame(self.adv_tab_viewport)
+
+        self.aud_row1 = tk.Frame(self.tab_frame_audio)
+        self.aud_row1.pack(fill="x", pady=(0, 6))
+        for i in range(2):
+            self.aud_row1.columnconfigure(i, weight=1, uniform="ar1")
+
+        self.adv_labels["lbl_aud_src"], self.cmb_aud_src = self._create_adv_combo(
+            self.aud_row1, 0, self.var_audio_source, ["output", "playback", "mic", "mic-unprocessed", "voice-call"], max_col=1
+        )
+        self.adv_labels["lbl_aud_codec"], self.cmb_aud_codec = self._create_adv_combo(
+            self.aud_row1, 1, self.var_audio_codec, ["opus", "aac", "flac", "raw"], max_col=1
+        )
+
+        self.aud_row2 = tk.Frame(self.tab_frame_audio)
+        self.aud_row2.pack(fill="x", pady=(0, 6))
+        for i in range(3):
+            self.aud_row2.columnconfigure(i, weight=1, uniform="ar2")
+
+        self.adv_labels["lbl_kb_mode"], self.cmb_kb_mode = self._create_adv_combo(
+            self.aud_row2, 0, self.var_kb_mode, ["sdk", "uhid", "aoa", "disabled"], max_col=2
+        )
+        self.adv_labels["lbl_mouse_mode"], self.cmb_mouse_mode = self._create_adv_combo(
+            self.aud_row2, 1, self.var_mouse_mode, ["sdk", "uhid", "aoa", "disabled"], max_col=2
+        )
+        self.adv_labels["lbl_gp_mode"], self.cmb_gp_mode = self._create_adv_combo(
+            self.aud_row2, 2, self.var_gamepad_mode, ["disabled", "uhid", "aoa"], max_col=2
+        )
+
+        self.aud_chk_frame = tk.Frame(self.tab_frame_audio)
+        self.aud_chk_frame.pack(fill="x")
+        self._add_check(self.aud_chk_frame, "chk_no_audio", self.var_no_audio, 0, 0)
+        self._add_check(self.aud_chk_frame, "chk_aud_dup", self.var_audio_dup, 1, 0)
+        self._add_check(self.aud_chk_frame, "chk_no_ctrl", self.var_no_control, 2, 0)
+
+        # --- TAB 3: DEVICE & WINDOW ---
+        self.tab_frame_window = tk.Frame(self.adv_tab_viewport)
+
+        self.win_chk_frame = tk.Frame(self.tab_frame_window)
+        self.win_chk_frame.pack(fill="x")
+        self.win_chk_frame.columnconfigure(0, weight=1, uniform="wchk")
+        self.win_chk_frame.columnconfigure(1, weight=1, uniform="wchk")
+
+        win_checks = [
+            ("chk_screen_off", self.var_screen_off, 0, 0),
+            ("chk_stay_awake", self.var_stay_awake, 0, 1),
+            ("chk_poff_close", self.var_power_off_close, 1, 0),
+            ("chk_touches", self.var_show_touches, 1, 1),
+            ("chk_top", self.var_always_on_top, 2, 0),
+            ("chk_full", self.var_fullscreen, 2, 1),
+            ("chk_borderless", self.var_borderless, 3, 0),
+            ("chk_nosaver", self.var_no_screensaver, 3, 1),
+        ]
+        for key, var, r, c in win_checks:
+            self._add_check(self.win_chk_frame, key, var, r, c)
+
+        self.extra_row = tk.Frame(self.tab_frame_window)
+        self.extra_row.pack(fill="x", pady=(8, 0))
+
+        self.adv_labels["lbl_extra"] = tk.Label(self.extra_row, text="", font=("Segoe UI", 8))
+        self.adv_labels["lbl_extra"].pack(side="left")
 
         self.ent_extra = tk.Entry(
             self.extra_row,
@@ -760,18 +932,37 @@ class ScrcpyCplApp:
         self.ent_extra.pack(side="left", fill="x", expand=True, padx=(6, 0), ipady=2)
         self.ent_extra.bind("<KeyRelease>", lambda e: self.on_manual_setting_changed())
 
-        # 5. Footer Card: Fixed-Width Command Preview + Auto-Exit Checkbox + Start Button
+        # Show initial tab inside adv_tab_viewport
+        self.tab_frame_video.pack(fill="both", expand=True)
+
+        # 5. Footer Card (Command Preview + Copy Button + Auto-Close + Launch)
         self.footer_card = tk.Frame(self.body, highlightthickness=1, padx=10, pady=8)
         self.footer_card.pack(fill="x")
 
+        self.cmd_row = tk.Frame(self.footer_card)
+        self.cmd_row.pack(fill="x", pady=(0, 8))
+
         self.ent_preview = tk.Entry(
-            self.footer_card,
+            self.cmd_row,
             relief="solid",
             bd=1,
             font=("Consolas", 9),
             state="readonly",
         )
-        self.ent_preview.pack(fill="x", pady=(0, 8), ipady=4)
+        self.ent_preview.pack(side="left", fill="x", expand=True, ipady=4)
+
+        self.btn_copy_cmd = tk.Button(
+            self.cmd_row,
+            text="Copy",
+            command=self.copy_command_to_clipboard,
+            relief="solid",
+            bd=1,
+            font=("Segoe UI", 8),
+            width=8,
+            pady=3,
+            cursor="hand2",
+        )
+        self.btn_copy_cmd.pack(side="right", padx=(6, 0))
 
         self.footer_bottom = tk.Frame(self.footer_card)
         self.footer_bottom.pack(fill="x")
@@ -799,15 +990,102 @@ class ScrcpyCplApp:
         )
         self.btn_start.pack(side="right")
 
-    def _create_adv_combo(self, parent, col, var, values):
+    def _create_adv_combo(self, parent, col, var, values, max_col=3):
         cell = tk.Frame(parent)
-        cell.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 3, 0 if col == 3 else 3))
+        cell.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 3, 0 if col == max_col else 3))
         lbl = tk.Label(cell, text="", font=("Segoe UI", 8))
         lbl.pack(anchor="w")
         cmb = ttk.Combobox(cell, textvariable=var, values=values, state="readonly", font=("Consolas", 8))
         cmb.pack(fill="x", pady=(2, 0))
         cmb.bind("<<ComboboxSelected>>", lambda e: self.on_manual_setting_changed())
         return lbl, cmb
+
+    def _add_check(self, parent, i18n_key, var, row, col):
+        cb = tk.Checkbutton(
+            parent,
+            text="",
+            variable=var,
+            command=self.on_manual_setting_changed,
+            font=("Segoe UI", 8),
+            anchor="w",
+            cursor="hand2",
+        )
+        cb.grid(row=row, column=col, sticky="ew", pady=1)
+        self.adv_checkboxes[i18n_key] = cb
+
+    def switch_adv_tab(self, tab_key: str):
+        self.active_adv_tab = tab_key
+        for k, frame in [
+            ("video", self.tab_frame_video),
+            ("audio", self.tab_frame_audio),
+            ("window", self.tab_frame_window),
+        ]:
+            if k == tab_key:
+                frame.pack(fill="both", expand=True)
+            else:
+                frame.pack_forget()
+        self.style_adv_tabs()
+
+    def browse_record_file(self):
+        path = filedialog.asksaveasfilename(
+            title="Save Recording As",
+            defaultextension=".mp4",
+            initialfile=self.var_record_path.get() or "scrcpy_capture.mp4",
+            filetypes=[("MP4 Video", "*.mp4"), ("Matroska Video", "*.mkv"), ("All Files", "*.*")],
+        )
+        if path:
+            self.var_record_path.set(path)
+            self.var_record.set(True)
+            self.on_manual_setting_changed()
+
+    def copy_command_to_clipboard(self):
+        cmd_str = self.ent_preview.get()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(cmd_str)
+        self.btn_copy_cmd.configure(text=self.t("copied_btn"))
+        self.root.after(1200, lambda: self.btn_copy_cmd.configure(text=self.t("copy_btn")))
+
+    # -------------------------------------------------------------------------
+    # Contextual Widget State Management (UX Improvement #2)
+    # -------------------------------------------------------------------------
+    def update_contextual_widget_states(self):
+        src = self.var_source.get()
+        is_otg = src == "otg"
+        is_cam = src == "camera"
+        is_new_disp = src == "new-display"
+        is_disp = src == "display"
+
+        # Video tab contextual states
+        for cmb in (self.cmb_res, self.cmb_fps, self.cmb_bitrate, self.cmb_codec, self.cmb_orient):
+            cmb.configure(state="disabled" if is_otg else "readonly")
+
+        self.cmb_cam_face.configure(state="readonly" if is_cam else "disabled")
+        self.adv_checkboxes["chk_flex"].configure(state="normal" if is_new_disp else "disabled")
+        self.cb_rec.configure(state="disabled" if is_otg else "normal")
+
+        rec_enabled = self.var_record.get() and not is_otg
+        self.ent_rec_path.configure(state="normal" if rec_enabled else "disabled")
+        self.btn_browse_rec.configure(state="normal" if rec_enabled else "disabled")
+
+        # Audio & Input tab contextual states
+        no_aud = self.var_no_audio.get() or is_otg
+        self.adv_checkboxes["chk_no_audio"].configure(state="disabled" if is_otg else "normal")
+        self.adv_checkboxes["chk_aud_dup"].configure(state="disabled" if no_aud else "normal")
+        self.cmb_aud_src.configure(
+            state="disabled" if (no_aud or self.var_audio_dup.get()) else "readonly"
+        )
+        self.cmb_aud_codec.configure(state="disabled" if no_aud else "readonly")
+
+        no_ctrl = self.var_no_control.get()
+        self.adv_checkboxes["chk_no_ctrl"].configure(state="disabled" if is_otg else "normal")
+        for cmb in (self.cmb_kb_mode, self.cmb_mouse_mode, self.cmb_gp_mode):
+            cmb.configure(state="disabled" if (no_ctrl or is_otg) else "readonly")
+
+        # Device & Window tab contextual states
+        for key in ("chk_screen_off", "chk_stay_awake", "chk_poff_close", "chk_touches"):
+            self.adv_checkboxes[key].configure(state="normal" if is_disp else "disabled")
+        for key in ("chk_top", "chk_full", "chk_borderless", "chk_nosaver"):
+            self.adv_checkboxes[key].configure(state="disabled" if is_otg else "normal")
 
     # -------------------------------------------------------------------------
     # Theme & Language Switching
@@ -822,7 +1100,6 @@ class ScrcpyCplApp:
         self.root.configure(bg=th["bg_main"])
         self.body.configure(bg=th["bg_main"])
 
-        # Header
         self.header_frame.configure(bg=th["bg_header"])
         for child in self.header_frame.winfo_children():
             if isinstance(child, tk.Frame):
@@ -842,7 +1119,6 @@ class ScrcpyCplApp:
         self.lang_frame.configure(bg=th["border"])
         self._style_lang_buttons()
 
-        # Cards
         for card in (self.dev_card, self.mode_card, self.adv_card, self.footer_card):
             card.configure(bg=th["bg_card"], highlightbackground=th["border"])
 
@@ -853,17 +1129,29 @@ class ScrcpyCplApp:
             self.preset_row2,
             self.adv_hdr,
             self.adv_body,
-            self.adv_grid,
-            self.adv_chk_frame,
+            self.adv_tab_bar,
+            self.adv_tab_viewport,
+            self.tab_frame_video,
+            self.vid_row1,
+            self.vid_row2,
+            self.vid_chk_frame,
+            self.rec_row,
+            self.tab_frame_audio,
+            self.aud_row1,
+            self.aud_row2,
+            self.aud_chk_frame,
+            self.tab_frame_window,
+            self.win_chk_frame,
             self.extra_row,
+            self.cmd_row,
             self.footer_bottom,
         ):
             container.configure(bg=th["bg_card"])
 
-        for cell in self.adv_grid.winfo_children():
-            cell.configure(bg=th["bg_card"])
+        for row_parent in (self.vid_row1, self.vid_row2, self.aud_row1, self.aud_row2):
+            for cell in row_parent.winfo_children():
+                cell.configure(bg=th["bg_card"])
 
-        # Labels & Buttons inside cards
         self.lbl_dev_title.configure(bg=th["bg_card"], fg=th["fg_main"])
         self.btn_wifi.configure(bg=th["bg_card"], fg=th["accent"], activebackground=th["bg_card"])
         self.btn_refresh_dev.configure(bg=th["bg_card"], fg=th["fg_muted"], activebackground=th["bg_card"])
@@ -874,28 +1162,46 @@ class ScrcpyCplApp:
         self.lbl_adv_title.configure(bg=th["bg_card"], fg=th["fg_main"])
         self.lbl_adv_toggle.configure(bg=th["bg_card"], fg=th["accent"])
 
-        for lbl in (self.lbl_src, self.lbl_res, self.lbl_fps, self.lbl_codec, self.lbl_extra):
+        for lbl in self.adv_labels.values():
             lbl.configure(bg=th["bg_card"], fg=th["fg_muted"])
 
         for cb in self.adv_checkboxes.values():
             cb.configure(
                 bg=th["bg_card"],
                 fg=th["fg_main"],
+                disabledforeground=th["fg_disabled"],
                 selectcolor=th["bg_input"],
                 activebackground=th["bg_card"],
                 activeforeground=th["fg_main"],
             )
 
-        self.ent_extra.configure(
-            bg=th["bg_input"],
+        for ent in (self.ent_extra, self.ent_rec_path):
+            ent.configure(
+                bg=th["bg_input"],
+                fg=th["fg_main"],
+                disabledbackground=th["bg_card"],
+                disabledforeground=th["fg_disabled"],
+                insertbackground=th["fg_main"],
+                highlightbackground=th["input_border"],
+            )
+
+        self.btn_browse_rec.configure(
+            bg=th["preset_idle_bg"],
             fg=th["fg_main"],
-            insertbackground=th["fg_main"],
-            highlightbackground=th["input_border"],
+            activebackground=th["border"],
+            activeforeground=th["fg_main"],
         )
 
         self.ent_preview.configure(
             readonlybackground=th["bg_cmd"],
             fg=th["fg_main"],
+        )
+
+        self.btn_copy_cmd.configure(
+            bg=th["preset_idle_bg"],
+            fg=th["fg_main"],
+            activebackground=th["border"],
+            activeforeground=th["fg_main"],
         )
 
         self.cb_autoclose.configure(
@@ -906,7 +1212,6 @@ class ScrcpyCplApp:
             activeforeground=th["fg_main"],
         )
 
-        # Combobox styling
         self.style.configure(
             "TCombobox",
             fieldbackground=th["bg_input"],
@@ -916,13 +1221,15 @@ class ScrcpyCplApp:
         )
         self.style.map(
             "TCombobox",
-            fieldbackground=[("readonly", th["bg_input"])],
+            fieldbackground=[("readonly", th["bg_input"]), ("disabled", th["bg_card"])],
             selectbackground=[("readonly", th["bg_input"])],
             selectforeground=[("readonly", th["fg_main"])],
+            foreground=[("disabled", th["fg_disabled"])],
         )
 
         self.style_dep_card()
         self.style_preset_buttons()
+        self.style_adv_tabs()
 
     def _style_lang_buttons(self):
         th = THEMES[self.theme_name]
@@ -932,6 +1239,27 @@ class ScrcpyCplApp:
         else:
             self.btn_lang_id.configure(bg=th["accent"], fg=th["accent_fg"])
             self.btn_lang_en.configure(bg=th["bg_card"], fg=th["fg_muted"])
+
+    def style_adv_tabs(self):
+        th = THEMES[self.theme_name]
+        for key, (cell, btn) in self.adv_tab_buttons.items():
+            is_sel = key == self.active_adv_tab
+            if is_sel:
+                cell.configure(bg=th["preset_active_bg"], highlightbackground=th["preset_active_border"])
+                btn.configure(
+                    bg=th["preset_active_bg"],
+                    fg=th["preset_active_fg"],
+                    activebackground=th["preset_active_bg"],
+                    activeforeground=th["preset_active_fg"],
+                )
+            else:
+                cell.configure(bg=th["preset_idle_bg"], highlightbackground=th["preset_idle_border"])
+                btn.configure(
+                    bg=th["preset_idle_bg"],
+                    fg=th["preset_idle_fg"],
+                    activebackground=th["border"],
+                    activeforeground=th["fg_main"],
+                )
 
     def set_language(self, lang_code: str):
         self.lang = lang_code
@@ -961,15 +1289,17 @@ class ScrcpyCplApp:
         self.lbl_adv_title.configure(text=self.t("adv_title"))
         self.lbl_adv_toggle.configure(text=self.t("collapse") if self.adv_expanded else self.t("expand"))
 
-        self.lbl_src.configure(text=self.t("lbl_source"))
-        self.lbl_res.configure(text=self.t("lbl_res"))
-        self.lbl_fps.configure(text=self.t("lbl_fps"))
-        self.lbl_codec.configure(text=self.t("lbl_codec"))
+        for t_key, (_, btn) in self.adv_tab_buttons.items():
+            btn.configure(text=self.t(f"tab_{t_key}"))
 
-        for i18n_key, cb in self.adv_checkboxes.items():
-            cb.configure(text=self.t(i18n_key))
+        for l_key, lbl in self.adv_labels.items():
+            lbl.configure(text=self.t(l_key))
 
-        self.lbl_extra.configure(text=self.t("lbl_extra"))
+        for c_key, cb in self.adv_checkboxes.items():
+            cb.configure(text=self.t(c_key))
+
+        self.btn_browse_rec.configure(text=self.t("btn_browse_rec"))
+        self.btn_copy_cmd.configure(text=self.t("copy_btn"))
         self.cb_autoclose.configure(text=self.t("auto_close"))
         self.btn_start.configure(text=self.t("start_btn"))
 
@@ -993,17 +1323,33 @@ class ScrcpyCplApp:
         self.var_source.set(state.get("source", "display"))
         self.var_max_size.set(state.get("max_size", "1920"))
         self.var_fps.set(state.get("fps", "60"))
+        self.var_bitrate.set(state.get("bitrate", "Default"))
         self.var_codec.set(state.get("codec", "h265"))
+        self.var_orientation.set(state.get("orientation", "Default"))
+        self.var_camera_facing.set(state.get("camera_facing", "Default"))
+        self.var_flex_display.set(state.get("flex_display", False))
+        self.var_record.set(state.get("record", False))
+
+        self.var_audio_source.set(state.get("audio_source", "output"))
+        self.var_audio_codec.set(state.get("audio_codec", "opus"))
+        self.var_no_audio.set(state.get("no_audio", False))
+        self.var_audio_dup.set(state.get("audio_dup", False))
+        self.var_kb_mode.set(state.get("kb_mode", "sdk"))
+        self.var_mouse_mode.set(state.get("mouse_mode", "sdk"))
+        self.var_gamepad_mode.set(state.get("gamepad_mode", "disabled"))
+        self.var_no_control.set(state.get("no_control", False))
+
         self.var_screen_off.set(state.get("screen_off", False))
         self.var_stay_awake.set(state.get("stay_awake", True))
-        self.var_no_audio.set(state.get("no_audio", False))
-        self.var_uhid_kb.set(state.get("uhid_kb", False))
-        self.var_uhid_gamepad.set(state.get("uhid_gamepad", False))
+        self.var_power_off_close.set(state.get("power_off_close", False))
+        self.var_show_touches.set(state.get("show_touches", False))
         self.var_always_on_top.set(state.get("always_on_top", False))
         self.var_fullscreen.set(state.get("fullscreen", False))
-        self.var_record.set(state.get("record", False))
+        self.var_borderless.set(state.get("borderless", False))
+        self.var_no_screensaver.set(state.get("no_screensaver", False))
         self._suppress_trace = False
 
+        self.update_contextual_widget_states()
         self.style_preset_buttons()
         self.update_mode_summary_and_preview()
         self.save_config()
@@ -1013,22 +1359,35 @@ class ScrcpyCplApp:
             "source": self.var_source.get(),
             "max_size": self.var_max_size.get(),
             "fps": self.var_fps.get(),
+            "bitrate": self.var_bitrate.get(),
             "codec": self.var_codec.get(),
+            "orientation": self.var_orientation.get(),
+            "camera_facing": self.var_camera_facing.get(),
+            "flex_display": self.var_flex_display.get(),
+            "record": self.var_record.get(),
+            "audio_source": self.var_audio_source.get(),
+            "audio_codec": self.var_audio_codec.get(),
+            "no_audio": self.var_no_audio.get(),
+            "audio_dup": self.var_audio_dup.get(),
+            "kb_mode": self.var_kb_mode.get(),
+            "mouse_mode": self.var_mouse_mode.get(),
+            "gamepad_mode": self.var_gamepad_mode.get(),
+            "no_control": self.var_no_control.get(),
             "screen_off": self.var_screen_off.get(),
             "stay_awake": self.var_stay_awake.get(),
-            "no_audio": self.var_no_audio.get(),
-            "uhid_kb": self.var_uhid_kb.get(),
-            "uhid_gamepad": self.var_uhid_gamepad.get(),
+            "power_off_close": self.var_power_off_close.get(),
+            "show_touches": self.var_show_touches.get(),
             "always_on_top": self.var_always_on_top.get(),
             "fullscreen": self.var_fullscreen.get(),
-            "record": self.var_record.get(),
+            "borderless": self.var_borderless.get(),
+            "no_screensaver": self.var_no_screensaver.get(),
         }
 
     def on_manual_setting_changed(self):
         if self._suppress_trace:
             return
+        self.update_contextual_widget_states()
         curr = self.get_current_form_state()
-        # Check if current settings match any standard preset
         matched_preset = None
         for p_key, p_val in PRESET_DEFS.items():
             if curr == p_val and not self.var_extra_args.get().strip():
@@ -1077,18 +1436,21 @@ class ScrcpyCplApp:
 
         parts = []
         if src == "new-display":
-            parts.append("Virtual 1080p")
+            parts.append("Flex Display" if st["flex_display"] else "Virtual 1080p")
         elif src == "camera":
-            parts.append("Camera")
+            face = st["camera_facing"]
+            parts.append(f"Cam ({face})" if face != "Default" else "Camera")
         else:
             parts.append("Native" if st["max_size"] == "0" else f"{st['max_size']}p")
 
         parts.append(f"{st['fps']}fps")
+        if st["bitrate"] != "Default":
+            parts.append(st["bitrate"])
         parts.append(st["codec"].upper())
         if st["screen_off"] and src == "display":
             parts.append("Screen Off")
-        if st["uhid_kb"] or st["uhid_gamepad"]:
-            parts.append("UHID")
+        if st["kb_mode"] != "sdk" or st["gamepad_mode"] != "disabled":
+            parts.append("HID/Gamepad")
         return " • ".join(parts)
 
     # -------------------------------------------------------------------------
@@ -1097,30 +1459,25 @@ class ScrcpyCplApp:
     def find_binary(self, name: str):
         exe_name = f"{name}.exe" if IS_WINDOWS else name
 
-        # 1. Custom user-selected directory
         if self.custom_bin_dir and os.path.isdir(self.custom_bin_dir):
             cand = os.path.join(self.custom_bin_dir, exe_name)
             if os.path.isfile(cand):
                 return cand
 
-        # 2. Same folder as executable/script
         script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         cand = os.path.join(script_dir, exe_name)
         if os.path.isfile(cand):
             return cand
 
-        # 3. Parent directory
         parent_dir = os.path.dirname(script_dir)
         cand = os.path.join(parent_dir, exe_name)
         if os.path.isfile(cand):
             return cand
 
-        # 4. System PATH
         found = shutil.which(name)
         if found:
             return found
 
-        # 5. Windows Winget / Scoop / Chocolatey / Portable install locations
         if IS_WINDOWS:
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             user_profile = os.environ.get("USERPROFILE", "")
@@ -1164,7 +1521,6 @@ class ScrcpyCplApp:
         else:
             self.lbl_adb_status.configure(text=f"● {self.t('adb_missing')}")
 
-        # Collapse install area if both are installed
         if self.scrcpy_path and self.adb_path:
             self.missing_panel.pack_forget()
         else:
@@ -1450,17 +1806,24 @@ class ScrcpyCplApp:
                 cmd.extend(extra.split())
             return cmd
 
+        # 1. Video & Display Options
         if source == "new-display":
-            cmd.append("--new-display=1920x1080")
+            if self.var_flex_display.get():
+                cmd.extend(["--new-display", "-x"])
+            else:
+                cmd.append("--new-display=1920x1080")
         elif source == "camera":
             cmd.append("--video-source=camera")
+            cam_face = self.var_camera_facing.get()
+            if cam_face != "Default":
+                cmd.append(f"--camera-facing={cam_face}")
 
         codec = self.var_codec.get()
         if codec and codec != "h264":
             cmd.append(f"--video-codec={codec}")
 
         size_val = self.var_max_size.get().strip()
-        if size_val.isdigit() and size_val != "0":
+        if size_val.isdigit() and size_val != "0" and not (source == "new-display" and self.var_flex_display.get()):
             if source == "camera":
                 cmd.append(f"--camera-size={size_val}x1080")
             else:
@@ -1470,23 +1833,71 @@ class ScrcpyCplApp:
         if fps.isdigit():
             cmd.append(f"--max-fps={fps}")
 
+        bitrate = self.var_bitrate.get().strip()
+        if bitrate and bitrate != "Default":
+            cmd.append(f"-b{bitrate}")
+
+        orient = self.var_orientation.get().strip()
+        if orient and orient != "Default":
+            cmd.append(f"--capture-orientation={orient}")
+
+        if self.var_record.get():
+            rec_file = self.var_record_path.get().strip() or "scrcpy_capture.mp4"
+            cmd.append(f"--record={rec_file}")
+
+        # 2. Audio & Input Options
+        if self.var_no_audio.get():
+            cmd.append("--no-audio")
+        else:
+            if self.var_audio_dup.get():
+                cmd.append("--audio-dup")
+            else:
+                aud_src = self.var_audio_source.get()
+                if aud_src and aud_src != "output":
+                    cmd.append(f"--audio-source={aud_src}")
+
+            aud_codec = self.var_audio_codec.get()
+            if aud_codec and aud_codec != "opus":
+                cmd.append(f"--audio-codec={aud_codec}")
+
+        if self.var_no_control.get():
+            cmd.append("-n")
+        else:
+            kb = self.var_kb_mode.get()
+            if kb == "uhid":
+                cmd.append("-K")
+            elif kb and kb != "sdk":
+                cmd.append(f"--keyboard={kb}")
+
+            mouse = self.var_mouse_mode.get()
+            if mouse == "uhid":
+                cmd.append("-M")
+            elif mouse and mouse != "sdk":
+                cmd.append(f"--mouse={mouse}")
+
+            gp = self.var_gamepad_mode.get()
+            if gp == "uhid":
+                cmd.append("-G")
+            elif gp and gp != "disabled":
+                cmd.append(f"--gamepad={gp}")
+
+        # 3. Device & Window Options
         if self.var_screen_off.get() and source == "display":
             cmd.append("-S")
         if self.var_stay_awake.get() and source == "display":
-            cmd.append("--stay-awake")
-        if self.var_no_audio.get():
-            cmd.append("--no-audio")
-        if self.var_uhid_kb.get():
-            cmd.append("-K")
-        if self.var_uhid_gamepad.get():
-            cmd.append("-G")
+            cmd.append("-w")
+        if self.var_power_off_close.get() and source == "display":
+            cmd.append("--power-off-on-close")
+        if self.var_show_touches.get() and source == "display":
+            cmd.append("-t")
         if self.var_always_on_top.get():
             cmd.append("--always-on-top")
         if self.var_fullscreen.get():
             cmd.append("-f")
-        if self.var_record.get():
-            rec_file = self.var_record_path.get().strip() or "scrcpy_capture.mp4"
-            cmd.append(f"--record={rec_file}")
+        if self.var_borderless.get():
+            cmd.append("--window-borderless")
+        if self.var_no_screensaver.get():
+            cmd.append("--disable-screensaver")
 
         extra = self.var_extra_args.get().strip()
         if extra:
@@ -1513,7 +1924,6 @@ class ScrcpyCplApp:
         return {}
 
     def save_config(self):
-        # If the user hadn't explicitly clicked a preset on first run, persist standard once saved
         persisted_preset = self.active_preset or "standard"
         data = {
             "lang": self.lang,
@@ -1553,18 +1963,39 @@ class ScrcpyCplApp:
             env["PATH"] = os.pathsep.join(extra_paths) + os.pathsep + env.get("PATH", "")
 
         try:
+            log_file = os.path.join(tempfile.gettempdir(), "scrcpy_cpl_last.log")
+            log_fh = open(log_file, "w+", encoding="utf-8", errors="replace")
+
             kwargs = {
                 "env": env,
                 "stdin": subprocess.DEVNULL,
-                "stdout": subprocess.DEVNULL,
-                "stderr": subprocess.DEVNULL,
+                "stdout": log_fh,
+                "stderr": subprocess.STDOUT,
             }
             if IS_WINDOWS:
-                kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
             else:
                 kwargs["start_new_session"] = True
 
-            subprocess.Popen(args, **kwargs)
+            proc = subprocess.Popen(args, **kwargs)
+
+            # Wait ~0.75s to catch immediate startup errors (e.g. no device connected, unauthorized ADB)
+            time.sleep(0.75)
+            ret = proc.poll()
+            log_fh.close()
+
+            if ret is not None and ret != 0:
+                err_text = ""
+                try:
+                    with open(log_file, "r", encoding="utf-8", errors="replace") as rf:
+                        err_text = rf.read().strip()
+                except Exception:
+                    pass
+                messagebox.showerror(
+                    self.t("launch_err_title"),
+                    self.t("launch_err_prefix") + (err_text or f"Exit code {ret}"),
+                )
+                return
 
             if self.var_auto_close.get():
                 self.root.destroy()
@@ -1574,6 +2005,7 @@ class ScrcpyCplApp:
 
 
 def main():
+    enable_windows_high_dpi()
     root = tk.Tk()
     ScrcpyCplApp(root)
     root.mainloop()

@@ -19,7 +19,11 @@ Works natively on **Windows**, **Linux**, and **macOS** using only Python's stan
 - **Smart Presets + Automatic `Custom` Profile**:
   - 6 one-click presets (`Standard`, `Gaming 120`, `Screen Off`, `Virtual Desk`, `Camera`, `OTG Input`) + `Custom`.
   - Remembers your last selected preset across launches.
-  - Modifying any option in the collapsible **Advanced Video & Control Settings** automatically switches to `Custom` and saves your custom configuration.
+  - Modifying any option in the collapsible **Advanced Video, Audio & Control Settings** automatically switches to `Custom` and saves your custom configuration.
+- **Comprehensive 3-Tab Advanced Panel (Collapsed by Default)**:
+  - **Video & Display**: Source, Max Size (`-m`), Max FPS, **Bit Rate (`-b`)**, Video Codec (`h265`/`h264`/`av1`), Capture Orientation, Camera Facing (`back`/`front`/`external`), Flex Virtual Display (`-x`), MP4 Recording.
+  - **Audio & Input**: Audio Source (`output`/`playback`/`mic`/`voice-call`), Audio Codec (`opus`/`aac`/`flac`/`raw`), Audio Duplication (`--audio-dup`), Keyboard/Mouse/Gamepad modes (`sdk`/`uhid`/`aoa`), Read-Only mode (`-n`).
+  - **Device & Window**: Turn Screen Off (`-S`), Stay Awake (`-w`), Power Off on Close, Show Touches (`-t`), Always on Top, Fullscreen (`-f`), Borderless Window, Disable PC Screensaver, and custom Extra Flags.
 - **0 MB RAM Overhead During Mirroring**:
   - Spawns `scrcpy` as an independent detached process and automatically closes the panel on launch.
 

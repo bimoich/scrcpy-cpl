@@ -58,7 +58,7 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           python generate_icon.py
-          python -m nuitka --onefile --windows-console-mode=disable --enable-plugin=tk-inter --windows-icon-from-ico=scrcpy_cpl.ico --company-name="bmolab" --product-name="scrcpy-cpl" --file-version="1.2.1.0" --product-version="1.2.1.0" --file-description="scrcpy-cpl Control Panel Applet" --output-dir=dist --output-filename=scrcpy-cpl.exe scrcpy_cpl.py
+          python -m nuitka --onefile --assume-yes-for-downloads --windows-console-mode=disable --enable-plugin=tk-inter --windows-icon-from-ico=scrcpy_cpl.ico --company-name="bmolab" --product-name="scrcpy-cpl" --file-version="1.2.1.0" --product-version="1.2.1.0" --file-description="scrcpy-cpl Control Panel Applet" --output-dir=dist --output-filename=scrcpy-cpl.exe scrcpy_cpl.py
 
       - name: Generate Custom .ico and Build Executable (Linux / macOS)
         if: runner.os != 'Windows'
